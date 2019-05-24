@@ -62,6 +62,7 @@ namespace storage_blobs_dotnet_quickstart
             string sourceFile = null;
             string destinationFile = null;
 
+            #region ParseConnectionString
             // Retrieve the connection string for use with the application. The storage connection string is stored
             // in an environment variable on the machine running the application called storageconnectionstring.
             // If the environment variable is created after the application is launched in a console or with Visual
@@ -75,57 +76,13 @@ namespace storage_blobs_dotnet_quickstart
                 {
                     // Create the CloudBlobClient that represents the Blob storage endpoint for the storage account.
                     CloudBlobClient cloudBlobClient = storageAccount.CreateCloudBlobClient();
+                    cloudBlobContainer = await CreateContainerAndSetPermissions(cloudBlobClient);
 
-                    // Create a container called 'quickstartblobs' and append a GUID value to it to make the name unique. 
-                    cloudBlobContainer = cloudBlobClient.GetContainerReference("quickstartblobs" + Guid.NewGuid().ToString());
-                    await cloudBlobContainer.CreateAsync();
-                    Console.WriteLine("Created container '{0}'", cloudBlobContainer.Name);
+                    var cloudBlockBlob = await UploadBlobs(cloudBlobContainer);
+                    await ListBlobsInContainer(cloudBlobContainer); // Loop while the continuation token is not null.
+
                     Console.WriteLine();
-
-                    // Set the permissions so the blobs are public. 
-                    BlobContainerPermissions permissions = new BlobContainerPermissions
-                    {
-                        PublicAccess = BlobContainerPublicAccessType.Blob
-                    };
-                    await cloudBlobContainer.SetPermissionsAsync(permissions);
-
-                    // Create a file in your local MyDocuments folder to upload to a blob.
-                    string localPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                    string localFileName = "QuickStart_" + Guid.NewGuid().ToString() + ".txt";
-                    sourceFile = Path.Combine(localPath, localFileName);
-                    // Write text to the file.
-                    File.WriteAllText(sourceFile, "Hello, World!");
-
-                    Console.WriteLine("Temp file = {0}", sourceFile);
-                    Console.WriteLine("Uploading to Blob storage as blob '{0}'", localFileName);
-                    Console.WriteLine();
-
-                    // Get a reference to the blob address, then upload the file to the blob.
-                    // Use the value of localFileName for the blob name.
-                    CloudBlockBlob cloudBlockBlob = cloudBlobContainer.GetBlockBlobReference(localFileName);
-                    await cloudBlockBlob.UploadFromFileAsync(sourceFile);
-
-                    // List the blobs in the container.
-                    Console.WriteLine("Listing blobs in container.");
-                    BlobContinuationToken blobContinuationToken = null;
-                    do
-                    {
-                        var resultSegment = await cloudBlobContainer.ListBlobsSegmentedAsync(null, blobContinuationToken);
-                        // Get the value of the continuation token returned by the listing call.
-                        blobContinuationToken = resultSegment.ContinuationToken;
-                        foreach (IListBlobItem item in resultSegment.Results)
-                        {
-                            Console.WriteLine(item.Uri);
-                        }
-                    } while (blobContinuationToken != null); // Loop while the continuation token is not null.
-                    Console.WriteLine();
-
-                    // Download the blob to a local file, using the reference created earlier. 
-                    // Append the string "_DOWNLOADED" before the .txt extension so that you can see both files in MyDocuments.
-                    destinationFile = sourceFile.Replace(".txt", "_DOWNLOADED.txt");
-                    Console.WriteLine("Downloading blob to {0}", destinationFile);
-                    Console.WriteLine();
-                    await cloudBlockBlob.DownloadToFileAsync(destinationFile, FileMode.Create);
+                    destinationFile = await DownloadBlob(sourceFile, cloudBlockBlob);
                 }
                 catch (StorageException ex)
                 {
@@ -133,18 +90,7 @@ namespace storage_blobs_dotnet_quickstart
                 }
                 finally
                 {
-                    Console.WriteLine("Press any key to delete the sample files and example container.");
-                    Console.ReadLine();
-                    // Clean up resources. This includes the container and the two temp files.
-                    Console.WriteLine("Deleting the container and any blobs it contains");
-                    if (cloudBlobContainer != null)
-                    {
-                        await cloudBlobContainer.DeleteIfExistsAsync();
-                    }
-                    Console.WriteLine("Deleting the local source file and local downloaded files");
-                    Console.WriteLine();
-                    File.Delete(sourceFile);
-                    File.Delete(destinationFile);
+                    await CleanUpResources(cloudBlobContainer, sourceFile, destinationFile);
                 }
             }
             else
@@ -154,6 +100,98 @@ namespace storage_blobs_dotnet_quickstart
                     "Add a environment variable named 'storageconnectionstring' with your storage " +
                     "connection string as a value.");
             }
+            #endregion
+        }
+
+        private static async Task CleanUpResources(CloudBlobContainer cloudBlobContainer, string sourceFile, string destinationFile)
+        {
+            #region CleanUpResources
+            Console.WriteLine("Press any key to delete the sample files and example container.");
+            Console.ReadLine();
+            // Clean up resources. This includes the container and the two temp files.
+            Console.WriteLine("Deleting the container and any blobs it contains");
+            if (cloudBlobContainer != null)
+            {
+                await cloudBlobContainer.DeleteIfExistsAsync();
+            }
+            Console.WriteLine("Deleting the local source file and local downloaded files");
+            Console.WriteLine();
+            File.Delete(sourceFile);
+            File.Delete(destinationFile);
+            #endregion
+        }
+
+        private static async Task<string> DownloadBlob(string sourceFile, CloudBlockBlob cloudBlockBlob)
+        {
+            #region DownloadBlob
+            // Download the blob to a local file, using the reference created earlier. 
+            // Append the string "_DOWNLOADED" before the .txt extension so that you can see both files in MyDocuments.
+            string destinationFile = sourceFile.Replace(".txt", "_DOWNLOADED.txt");
+            Console.WriteLine("Downloading blob to {0}", destinationFile);
+            Console.WriteLine();
+            await cloudBlockBlob.DownloadToFileAsync(destinationFile, FileMode.Create);
+            #endregion
+            return destinationFile;
+        }
+
+        private static async Task ListBlobsInContainer(CloudBlobContainer cloudBlobContainer)
+        {
+            #region ListBlobs
+            // List the blobs in the container.
+            Console.WriteLine("Listing blobs in container.");
+            BlobContinuationToken blobContinuationToken = null;
+            do
+            {
+                var resultSegment = await cloudBlobContainer.ListBlobsSegmentedAsync(null, blobContinuationToken);
+                // Get the value of the continuation token returned by the listing call.
+                blobContinuationToken = resultSegment.ContinuationToken;
+                foreach (IListBlobItem item in resultSegment.Results)
+                {
+                    Console.WriteLine(item.Uri);
+                }
+            } while (blobContinuationToken != null);
+            #endregion
+        }
+
+        private static async Task<CloudBlobContainer> CreateContainerAndSetPermissions(CloudBlobClient cloudBlobClient)
+        {
+            #region CreateContainerAndSetPermissions
+            // Create a container called 'quickstartblobs' and append a GUID value to it to make the name unique. 
+            CloudBlobContainer cloudBlobContainer = cloudBlobClient.GetContainerReference("quickstartblobs" + Guid.NewGuid().ToString());
+            await cloudBlobContainer.CreateAsync();
+            Console.WriteLine("Created container '{0}'", cloudBlobContainer.Name);
+            Console.WriteLine();
+
+            // Set the permissions so the blobs are public. 
+            BlobContainerPermissions permissions = new BlobContainerPermissions
+            {
+                PublicAccess = BlobContainerPublicAccessType.Blob
+            };
+            await cloudBlobContainer.SetPermissionsAsync(permissions);
+            #endregion
+            return cloudBlobContainer;
+        }
+
+        private static async Task<CloudBlockBlob> UploadBlobs(CloudBlobContainer cloudBlobContainer)
+        {
+            #region UploadBlobs
+            // Create a file in your local MyDocuments folder to upload to a blob.
+            string localPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string localFileName = "QuickStart_" + Guid.NewGuid().ToString() + ".txt";
+            string sourceFile = Path.Combine(localPath, localFileName);
+            // Write text to the file.
+            File.WriteAllText(sourceFile, "Hello, World!");
+
+            Console.WriteLine("Temp file = {0}", sourceFile);
+            Console.WriteLine("Uploading to Blob storage as blob '{0}'", localFileName);
+            Console.WriteLine();
+
+            // Get a reference to the blob address, then upload the file to the blob.
+            // Use the value of localFileName for the blob name.
+            CloudBlockBlob cloudBlockBlob = cloudBlobContainer.GetBlockBlobReference(localFileName);
+            await cloudBlockBlob.UploadFromFileAsync(sourceFile);
+            #endregion
+            return cloudBlockBlob;
         }
     }
 }
